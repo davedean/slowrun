@@ -57,6 +57,8 @@ parser.add_argument("--dupe-layers-start", type=int, default=15,
                     help="First decoder layer to duplicate (inclusive)")
 parser.add_argument("--dupe-layers-end", type=int, default=21,
                     help="Last decoder layer to duplicate (exclusive)")
+parser.add_argument("--pretrained-checkpoint", type=str, default=None,
+                    help="Path to NCA pre-pre-trained checkpoint for weight transfer")
 args = parser.parse_args()
 
 # Resolve output path
@@ -749,6 +751,26 @@ with torch.device("meta"):
     model = GPT(config)
 model.to_empty(device=device)
 model.init_weights()
+
+# Load pre-pre-trained trunk weights (NCA or other)
+if args.pretrained_checkpoint:
+    ckpt = torch.load(args.pretrained_checkpoint, weights_only=False, map_location=device)
+    pretrained_state = ckpt["model_state_dict"]
+    skip_prefixes = ("transformer.wte.", "lm_head.", "cos", "sin")
+    loaded, skipped = 0, 0
+    model_state = model.state_dict()
+    for key, val in pretrained_state.items():
+        if any(key.startswith(p) for p in skip_prefixes):
+            skipped += 1
+            continue
+        if key in model_state and val.shape == model_state[key].shape:
+            model_state[key] = val
+            loaded += 1
+        else:
+            skipped += 1
+    model.load_state_dict(model_state)
+    print0(f"Loaded {loaded} pretrained weights, skipped {skipped} "
+           f"(from {args.pretrained_checkpoint})")
 
 param_counts = sum(p.numel() for p in model.parameters())
 transformer_params = sum(p.numel() for p in model.transformer.h.parameters())
