@@ -34,12 +34,30 @@ echo ""
 CONFIG=${NCA_CONFIG:-full}
 if [ ! -f checkpoints/nca_best.pt ]; then
     echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG)..."
-    $PYTHON pretrain.py \
-        --data-dir ./data \
-        --output-dir ./checkpoints \
-        --config "$CONFIG" \
-        ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
+
+    # Detect number of GPUs
+    NUM_GPUS=0
+    if command -v nvidia-smi &>/dev/null; then
+        NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')
+    fi
+
+    TRAIN_ARGS=(
+        --data-dir ./data
+        --output-dir ./checkpoints
+        --config "$CONFIG"
+        ${NCA_DEVICE:+--device "$NCA_DEVICE"}
         ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"}
+    )
+
+    if [ "$NUM_GPUS" -gt 1 ] && [ -z "$NCA_DEVICE" ]; then
+        echo "    Detected $NUM_GPUS GPUs, using torchrun DDP"
+        $PYTHON -m torch.distributed.run \
+            --standalone --nproc_per_node="$NUM_GPUS" \
+            pretrain.py "${TRAIN_ARGS[@]}"
+    else
+        echo "    Single GPU/CPU mode"
+        $PYTHON pretrain.py "${TRAIN_ARGS[@]}"
+    fi
 else
     echo ">>> Step 2: NCA checkpoint already exists, skipping"
 fi
