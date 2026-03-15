@@ -39,6 +39,10 @@ CONFIGS = {
         n_layer=12, n_head=8, n_kv_head=8, n_embd=768,
         batch_size=32, grad_accum=2, lr=3e-4, epochs=3,
     ),
+    "tiny-track": dict(
+        n_layer=16, n_head=8, n_kv_head=8, n_embd=1024,
+        batch_size=16, grad_accum=2, lr=2e-4, epochs=3,
+    ),
     "full": dict(
         n_layer=30, n_head=14, n_kv_head=14, n_embd=1792,
         batch_size=8, grad_accum=8, lr=1e-4, epochs=3,
@@ -167,7 +171,7 @@ def train(args):
         print(f"Model params: {n_params:,}")
 
     # torch.compile for fused kernels — big speedup on H100
-    if device != "cpu":
+    if device != "cpu" and not args.no_compile:
         if is_main:
             print("Compiling model with torch.compile...")
         model = torch.compile(model)
@@ -203,10 +207,11 @@ def train(args):
     train_sampler = DistributedSampler(
         train_dataset, num_replicas=world_size, rank=rank, shuffle=True
     ) if ddp else None
+    dl_workers = 2 if ddp else 0
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, sampler=train_sampler,
-        shuffle=(train_sampler is None), num_workers=2, pin_memory=True,
-        drop_last=True,
+        shuffle=(train_sampler is None), num_workers=dl_workers,
+        pin_memory=(dl_workers > 0), drop_last=True,
     )
 
     n_train_tokens = train_tokens.shape[0] * seq_len
@@ -349,6 +354,8 @@ def main():
                         help="Override config batch size")
     parser.add_argument("--grad-accum", type=int, default=None,
                         help="Override config gradient accumulation steps")
+    parser.add_argument("--no-compile", action="store_true",
+                        help="Disable torch.compile")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
