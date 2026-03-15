@@ -1,3 +1,6 @@
 fineweb_data/
 wandb/
-checkpoints/__pycache__/
+checkpoints/
+nca/data/
+nca/checkpoints/
+nca/__pycache__/

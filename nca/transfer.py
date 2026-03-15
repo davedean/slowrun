@@ -6,9 +6,9 @@ Re-initializes: transformer.wte (normal 0,1), lm_head (normal 0,0.001)
 Recomputes: RoPE buffers for target seq_len
 
 Usage:
-    python transfer_weights.py \
-        --nca-checkpoint ./nca_checkpoints/nca_best.pt \
-        --output ./nca_checkpoints/transferred.pt \
+    python transfer.py \
+        --nca-checkpoint ./checkpoints/nca_best.pt \
+        --output ./checkpoints/transferred.pt \
         --target-vocab-size 50257
 """
 
@@ -27,8 +27,6 @@ def transfer_weights(nca_ckpt_path, output_path, target_vocab_size=50257,
     ckpt = torch.load(nca_ckpt_path, weights_only=False, map_location="cpu")
     nca_config = ckpt["config"]
     nca_state = ckpt["model_state_dict"]
-    # Strip _orig_mod. prefix from torch.compile'd checkpoints
-    nca_state = {k.removeprefix("_orig_mod."): v for k, v in nca_state.items()}
     print(f"NCA checkpoint: step={ckpt.get('step')}, "
           f"val_loss={ckpt.get('val_loss', '?')}")
     print(f"NCA config: vocab={nca_config.vocab_size}, "

@@ -6,9 +6,17 @@
 #
 # Usage:
 #   cd nca/
-#   bash run.sh              # generates data + trains + transfers
+#   bash run.sh
 #   cd ..
 #   torchrun --standalone --nproc_per_node=8 train.py --pretrained-checkpoint nca/checkpoints/transferred.pt
+#
+# Environment variables:
+#   NCA_CONFIG   - pretrain config: tiny, small, full (default: full)
+#   NCA_DEVICE   - device override (default: auto-detect)
+#   NCA_EPOCHS   - override number of epochs
+#   NCA_SEED     - training seed (default: 42)
+#   NUM_WORKERS  - data generation workers (default: 8)
+#   PYTHON       - python binary (default: python3)
 set -e
 
 PYTHON=${PYTHON:-python3}
@@ -30,34 +38,17 @@ else
 fi
 echo ""
 
-# Step 2: Pre-train on NCA data
+# Step 2: Pre-train on NCA data (single GPU)
 CONFIG=${NCA_CONFIG:-full}
 if [ ! -f checkpoints/nca_best.pt ]; then
     echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG)..."
-
-    # Detect number of GPUs
-    NUM_GPUS=0
-    if command -v nvidia-smi &>/dev/null; then
-        NUM_GPUS=$(nvidia-smi -L 2>/dev/null | wc -l | tr -d ' ')
-    fi
-
-    TRAIN_ARGS=(
-        --data-dir ./data
-        --output-dir ./checkpoints
-        --config "$CONFIG"
-        ${NCA_DEVICE:+--device "$NCA_DEVICE"}
-        ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"}
-    )
-
-    if [ "$NUM_GPUS" -gt 1 ] && [ -z "$NCA_DEVICE" ]; then
-        echo "    Detected $NUM_GPUS GPUs, using torchrun DDP"
-        $PYTHON -m torch.distributed.run \
-            --standalone --nproc_per_node="$NUM_GPUS" \
-            pretrain.py "${TRAIN_ARGS[@]}"
-    else
-        echo "    Single GPU/CPU mode"
-        $PYTHON pretrain.py "${TRAIN_ARGS[@]}"
-    fi
+    $PYTHON pretrain.py \
+        --data-dir ./data \
+        --output-dir ./checkpoints \
+        --config "$CONFIG" \
+        ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
+        ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
+        ${NCA_SEED:+--seed "$NCA_SEED"}
 else
     echo ">>> Step 2: NCA checkpoint already exists, skipping"
 fi
