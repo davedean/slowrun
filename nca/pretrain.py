@@ -166,9 +166,24 @@ def train(args):
     if is_main:
         print(f"Model params: {n_params:,}")
 
-    # Wrap with DDP
+    # torch.compile for fused kernels — big speedup on H100
+    if device != "cpu":
+        if is_main:
+            print("Compiling model with torch.compile...")
+        model = torch.compile(model)
+
+    # Wrap with DDP, use bf16 gradient reduction to halve comm volume
     if ddp:
-        model = DDP(model, device_ids=[local_rank])
+        model = DDP(model, device_ids=[local_rank], gradient_as_bucket_view=True)
+
+        def bf16_compress_hook(state, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
+            compressed = bucket.buffer().to(torch.bfloat16)
+            fut = dist.all_reduce(compressed, async_op=True).get_future()
+            def decompress(fut_result):
+                return fut_result.value()[0].to(torch.float32) / dist.get_world_size()
+            return fut.then(decompress)
+
+        model.register_comm_hook(state=None, hook=bf16_compress_hook)
     raw_model = model.module if ddp else model
 
     # Optimizer
@@ -215,6 +230,7 @@ def train(args):
 
     best_val_loss = float("inf")
     t0 = time.time()
+    step_t0 = t0
     step = 0
 
     for epoch in range(cfg["epochs"]):
@@ -258,11 +274,14 @@ def train(args):
 
             # Logging (rank 0 only)
             if is_main and step % 10 == 0:
-                elapsed = time.time() - t0
-                tok_per_sec = (step + 1) * tokens_per_step / elapsed
+                now = time.time()
+                # Rolling tok/s over last 10 steps (instantaneous)
+                dt = now - step_t0
+                inst_tok_per_sec = 10 * tokens_per_step / dt if dt > 0 else 0
+                step_t0 = now
                 print(f"step {step:>5d}/{total_steps} | "
                       f"loss {train_loss_accum:.4f} | "
-                      f"lr {lr:.2e} | {tok_per_sec:,.0f} tok/s")
+                      f"lr {lr:.2e} | {inst_tok_per_sec:,.0f} tok/s")
 
             # Evaluation (rank 0 only)
             if is_main and (step % eval_interval == 0 or step == total_steps - 1):
@@ -328,6 +347,8 @@ def main():
                         help="Override config learning rate")
     parser.add_argument("--batch-size", type=int, default=None,
                         help="Override config batch size")
+    parser.add_argument("--grad-accum", type=int, default=None,
+                        help="Override config gradient accumulation steps")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -339,6 +360,8 @@ def main():
         CONFIGS[args.config]["lr"] = args.lr
     if args.batch_size is not None:
         CONFIGS[args.config]["batch_size"] = args.batch_size
+    if args.grad_accum is not None:
+        CONFIGS[args.config]["grad_accum"] = args.grad_accum
 
     train(args)
 
