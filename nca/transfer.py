@@ -27,6 +27,8 @@ def transfer_weights(nca_ckpt_path, output_path, target_vocab_size=50257,
     ckpt = torch.load(nca_ckpt_path, weights_only=False, map_location="cpu")
     nca_config = ckpt["config"]
     nca_state = ckpt["model_state_dict"]
+    # Strip _orig_mod. prefix from torch.compile'd checkpoints
+    nca_state = {k.removeprefix("_orig_mod."): v for k, v in nca_state.items()}
     print(f"NCA checkpoint: step={ckpt.get('step')}, "
           f"val_loss={ckpt.get('val_loss', '?')}")
     print(f"NCA config: vocab={nca_config.vocab_size}, "
