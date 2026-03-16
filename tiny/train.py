@@ -56,6 +56,8 @@ parser.add_argument("--input_val_bin", type=str, default=None)
 parser.add_argument("--output_json", type=str, default=None)
 parser.add_argument("--wandb_group", type=str, default=None)
 parser.add_argument("--dropout", type=float, default=0.1)
+parser.add_argument("--no-nca-pretrain", action="store_true",
+                    help="Skip NCA pre-pre-training pipeline")
 args = parser.parse_args()
 
 # Resolve output path
@@ -685,6 +687,27 @@ if ddp and torch.cuda.is_available():
 else:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# ── NCA pre-pre-training (runs before main training by default) ───────────
+nca_checkpoint_path = None
+if not args.no_nca_pretrain:
+    import subprocess
+    nca_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nca")
+    nca_ckpt = os.path.join(nca_dir, "checkpoints", "transferred.pt")
+    if os.path.exists(nca_ckpt):
+        print0(f"NCA checkpoint already exists: {nca_ckpt}, skipping NCA pipeline")
+    else:
+        if master_process:
+            print0("=== Running NCA pre-pre-training pipeline (tiny-track) ===")
+            result = subprocess.run(["bash", "run.sh"], cwd=nca_dir,
+                                    env={**os.environ, "PYTHONUNBUFFERED": "1",
+                                         "NCA_CONFIG": "tiny-track"})
+            if result.returncode != 0:
+                raise RuntimeError(f"NCA pipeline failed with exit code {result.returncode}")
+            print0("=== NCA pipeline complete ===")
+        if ddp:
+            dist.barrier()
+    nca_checkpoint_path = nca_ckpt
+
 device_type = device.type
 autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16) if device_type == "cuda" else nullcontext()
 synchronize = torch.cuda.synchronize if device_type == "cuda" else lambda: None
@@ -745,6 +768,27 @@ with torch.device("meta"):
     model = GPT(config)
 model.to_empty(device=device)
 model.init_weights()
+
+# Load NCA pre-pre-trained trunk weights
+if nca_checkpoint_path and os.path.exists(nca_checkpoint_path):
+    ckpt = torch.load(nca_checkpoint_path, weights_only=False, map_location=device)
+    pretrained_state = ckpt["model_state_dict"]
+    skip_prefixes = ("transformer.wte.", "lm_head.", "cos", "sin")
+    loaded, skipped = 0, 0
+    model_state = model.state_dict()
+    for key, val in pretrained_state.items():
+        if any(key.startswith(p) for p in skip_prefixes):
+            skipped += 1
+            continue
+        if key in model_state and val.shape == model_state[key].shape:
+            model_state[key] = val
+            loaded += 1
+        else:
+            skipped += 1
+    model.load_state_dict(model_state)
+    print0(f"Loaded {loaded} pretrained weights, skipped {skipped} "
+           f"(from {nca_checkpoint_path})")
+    del ckpt, pretrained_state
 
 param_counts = sum(p.numel() for p in model.parameters())
 transformer_params = sum(p.numel() for p in model.transformer.h.parameters())

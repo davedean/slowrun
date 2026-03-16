@@ -34,6 +34,10 @@ CONFIGS = {
         n_layer=12, n_head=8, n_kv_head=8, n_embd=768,
         batch_size=32, grad_accum=2, lr=3e-4, epochs=3,
     ),
+    "tiny-track": dict(
+        n_layer=16, n_head=8, n_kv_head=8, n_embd=1024,
+        batch_size=16, grad_accum=2, lr=2e-4, epochs=3,
+    ),
     "full": dict(
         n_layer=30, n_head=14, n_kv_head=14, n_embd=1792,
         batch_size=8, grad_accum=8, lr=1e-4, epochs=3,

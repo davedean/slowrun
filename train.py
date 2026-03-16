@@ -696,7 +696,7 @@ else:
 # ── NCA pre-pre-training (runs before main training if --nca-pretrain) ────
 if not args.no_nca_pretrain:
     import subprocess
-    nca_dir = os.path.join(os.path.dirname(__file__), "nca")
+    nca_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nca")
     nca_ckpt = os.path.join(nca_dir, "checkpoints", "transferred.pt")
     if os.path.exists(nca_ckpt):
         print0(f"NCA checkpoint already exists: {nca_ckpt}, skipping NCA pipeline")
