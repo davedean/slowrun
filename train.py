@@ -59,6 +59,8 @@ parser.add_argument("--dupe-layers-end", type=int, default=21,
                     help="Last decoder layer to duplicate (exclusive)")
 parser.add_argument("--pretrained-checkpoint", type=str, default=None,
                     help="Path to NCA pre-pre-trained checkpoint for weight transfer")
+parser.add_argument("--nca-pretrain", action="store_true",
+                    help="Run NCA pre-pre-training pipeline before main training")
 args = parser.parse_args()
 
 # Resolve output path
@@ -690,6 +692,25 @@ if ddp and torch.cuda.is_available():
     dist.barrier()
 else:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# ── NCA pre-pre-training (runs before main training if --nca-pretrain) ────
+if args.nca_pretrain:
+    import subprocess
+    nca_dir = os.path.join(os.path.dirname(__file__), "nca")
+    nca_ckpt = os.path.join(nca_dir, "checkpoints", "transferred.pt")
+    if os.path.exists(nca_ckpt):
+        print0(f"NCA checkpoint already exists: {nca_ckpt}, skipping NCA pipeline")
+    else:
+        if master_process:
+            print0("=== Running NCA pre-pre-training pipeline ===")
+            result = subprocess.run(["bash", "run.sh"], cwd=nca_dir,
+                                    env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            if result.returncode != 0:
+                raise RuntimeError(f"NCA pipeline failed with exit code {result.returncode}")
+            print0("=== NCA pipeline complete ===")
+        if ddp:
+            dist.barrier()
+    args.pretrained_checkpoint = nca_ckpt
 
 device_type = device.type
 autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=torch.bfloat16) if device_type == "cuda" else nullcontext()
