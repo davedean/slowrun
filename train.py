@@ -59,8 +59,8 @@ parser.add_argument("--dupe-layers-end", type=int, default=21,
                     help="Last decoder layer to duplicate (exclusive)")
 parser.add_argument("--pretrained-checkpoint", type=str, default=None,
                     help="Path to NCA pre-pre-trained checkpoint for weight transfer")
-parser.add_argument("--nca-pretrain", action="store_true",
-                    help="Run NCA pre-pre-training pipeline before main training")
+parser.add_argument("--no-nca-pretrain", action="store_true",
+                    help="Skip NCA pre-pre-training pipeline")
 args = parser.parse_args()
 
 # Resolve output path
@@ -694,7 +694,7 @@ else:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ── NCA pre-pre-training (runs before main training if --nca-pretrain) ────
-if args.nca_pretrain:
+if not args.no_nca_pretrain:
     import subprocess
     nca_dir = os.path.join(os.path.dirname(__file__), "nca")
     nca_ckpt = os.path.join(nca_dir, "checkpoints", "transferred.pt")
