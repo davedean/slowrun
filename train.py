@@ -781,7 +781,10 @@ model.init_weights()
 
 # Load pre-pre-trained trunk weights (NCA or other)
 if args.pretrained_checkpoint:
+    # Add nca/ to path so torch.load can unpickle the GPTConfig from nca/model.py
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "nca"))
     ckpt = torch.load(args.pretrained_checkpoint, weights_only=False, map_location=device)
+    sys.path.pop(0)
     pretrained_state = ckpt["model_state_dict"]
     # Detect if NCA checkpoint uses same vocab (GPT-2 mode) — if so, load embeddings too
     nca_vocab = ckpt.get("config", None)
