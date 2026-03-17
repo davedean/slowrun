@@ -692,7 +692,11 @@ nca_checkpoint_path = None
 if not args.no_nca_pretrain:
     import subprocess
     nca_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nca")
-    nca_ckpt = os.path.join(nca_dir, "checkpoints", "transferred.pt")
+    # GPT-2 vocab mode: checkpoint is nca_best.pt (no transfer needed)
+    # Legacy 10K mode: checkpoint is transferred.pt
+    nca_ckpt_gpt2 = os.path.join(nca_dir, "checkpoints", "nca_best.pt")
+    nca_ckpt_legacy = os.path.join(nca_dir, "checkpoints", "transferred.pt")
+    nca_ckpt = nca_ckpt_gpt2 if os.path.exists(nca_ckpt_gpt2) else nca_ckpt_legacy
     if os.path.exists(nca_ckpt):
         print0(f"NCA checkpoint already exists: {nca_ckpt}, skipping NCA pipeline")
     else:
@@ -773,7 +777,16 @@ model.init_weights()
 if nca_checkpoint_path and os.path.exists(nca_checkpoint_path):
     ckpt = torch.load(nca_checkpoint_path, weights_only=False, map_location=device)
     pretrained_state = ckpt["model_state_dict"]
-    skip_prefixes = ("transformer.wte.", "lm_head.", "cos", "sin")
+    # Detect if NCA checkpoint uses same vocab (GPT-2 mode) — if so, load embeddings too
+    nca_config = ckpt.get("config", None)
+    nca_vocab_size = getattr(nca_config, "vocab_size", 0) if nca_config else 0
+    if nca_vocab_size == vocab_size:
+        # GPT-2 vocab: load everything except RoPE buffers
+        skip_prefixes = ("cos", "sin")
+        print0(f"GPT-2 vocab NCA checkpoint detected — loading all weights including embeddings")
+    else:
+        # Legacy 10K vocab: skip embeddings (wrong size)
+        skip_prefixes = ("transformer.wte.", "lm_head.", "cos", "sin")
     loaded, skipped = 0, 0
     model_state = model.state_dict()
     for key, val in pretrained_state.items():
