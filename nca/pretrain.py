@@ -41,7 +41,7 @@ CONFIGS = {
     ),
     "tiny-track": dict(
         n_layer=16, n_head=8, n_kv_head=8, n_embd=1024,
-        batch_size=4, grad_accum=4, lr=2e-4, epochs=3,
+        batch_size=32, grad_accum=1, lr=2e-4, epochs=3,
     ),
     "full": dict(
         n_layer=30, n_head=14, n_kv_head=14, n_embd=1792,
