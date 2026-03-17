@@ -115,10 +115,10 @@ def train(args):
     model.init_weights()
     model = model.to(device)
 
-    # torch.compile for GPU speedup
+    # torch.compile for GPU speedup (default mode — reduce-overhead can crash with CUDAGraphs)
     use_compile = device != "cpu" and not getattr(args, 'no_compile', False)
     if use_compile:
-        model = torch.compile(model, mode="reduce-overhead")
+        model = torch.compile(model)
 
     def _unwrapped_state_dict():
         """Strip _orig_mod. prefix from torch.compile'd state dict."""
