@@ -52,6 +52,8 @@ if [ "$MODE" = "gpt2" ]; then
         echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG, GPT-2 vocab)..."
         # Single GPU, skip eval — fastest for short pretrain (<20s)
         # DDP overhead (torchrun launch + NCCL init) costs more than it saves
+        # Clear parent torchrun env so pretrain doesn't try DDP
+        unset RANK LOCAL_RANK WORLD_SIZE MASTER_ADDR MASTER_PORT GROUP_RANK LOCAL_WORLD_SIZE ROLE_RANK TORCHELASTIC_RESTART_COUNT TORCHELASTIC_MAX_RESTARTS TORCHELASTIC_RUN_ID 2>/dev/null
         $PYTHON pretrain.py \
             --data-dir ./data \
             --output-dir ./checkpoints \
