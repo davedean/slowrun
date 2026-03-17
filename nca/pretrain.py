@@ -171,7 +171,8 @@ def train(args):
     n_train_tokens = train_tokens.shape[0] * seq_len
     steps_per_epoch = n_train_tokens // tokens_per_step
     total_steps = steps_per_epoch * cfg["epochs"]
-    eval_interval = max(1, steps_per_epoch // 2)
+    skip_eval = getattr(args, 'skip_eval', False)
+    eval_interval = max(1, steps_per_epoch // 2) if not skip_eval else total_steps + 1
 
     if is_main:
         print(f"Batch: {batch_size}/gpu x {grad_accum} accum x {world_size} gpus"
@@ -270,15 +271,20 @@ def train(args):
                 }, ckpt_path)
                 print(f"  >> saved best checkpoint: {ckpt_path}")
 
-    # Save final checkpoint
+    # Save final checkpoint (also as nca_best.pt if no eval was run)
     if is_main:
-        final_path = os.path.join(args.output_dir, "nca_final.pt")
-        torch.save({
-            "model_state_dict": raw_model.state_dict(),
+        state = raw_model.state_dict()
+        ckpt = {
+            "model_state_dict": state,
             "config": model_config,
             "step": total_steps,
             "val_loss": best_val_loss,
-        }, final_path)
+        }
+        final_path = os.path.join(args.output_dir, "nca_final.pt")
+        torch.save(ckpt, final_path)
+        if best_val_loss == float("inf"):
+            # No eval was run — save as best too
+            torch.save(ckpt, os.path.join(args.output_dir, "nca_best.pt"))
 
         elapsed = time.time() - t0
         print(f"\nTraining complete in {elapsed:.1f}s")
@@ -327,6 +333,8 @@ def main():
     parser.add_argument("--vocab-size", type=int, default=None)
     parser.add_argument("--save-every-tokens", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--skip-eval", action="store_true",
+                        help="Skip validation during training (faster)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
