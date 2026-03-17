@@ -335,6 +335,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--skip-eval", action="store_true",
                         help="Skip validation during training (faster)")
+    parser.add_argument("--compile", action="store_true",
+                        help="Enable torch.compile (slower startup, faster training)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
