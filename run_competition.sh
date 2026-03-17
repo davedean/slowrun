@@ -35,5 +35,5 @@ fi
 # Go
 echo ""
 echo "=== Starting training ==="
-PYTHONUNBUFFERED=1 NCA_TOKENS=2000000 NCA_EPOCHS=1 \
+PYTHONUNBUFFERED=1 NCA_TOKENS=1000000 NCA_EPOCHS=1 \
     torchrun --standalone --nproc_per_node=8 tiny/train.py

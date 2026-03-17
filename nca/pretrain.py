@@ -115,8 +115,9 @@ def train(args):
     model.init_weights()
     model = model.to(device)
 
-    # torch.compile for GPU speedup (default mode — reduce-overhead can crash with CUDAGraphs)
-    use_compile = device != "cpu" and not getattr(args, 'no_compile', False)
+    # torch.compile disabled by default — NCA pretrain is short enough that
+    # compile warmup costs more than it saves
+    use_compile = device != "cpu" and getattr(args, 'compile', False)
     if use_compile:
         model = torch.compile(model)
 
