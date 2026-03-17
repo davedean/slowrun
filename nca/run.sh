@@ -49,15 +49,29 @@ if [ "$MODE" = "gpt2" ]; then
     echo ""
 
     if [ ! -f checkpoints/nca_best.pt ]; then
-        echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG, GPT-2 vocab)..."
-        $PYTHON pretrain.py \
-            --data-dir ./data \
-            --output-dir ./checkpoints \
-            --config "$CONFIG" \
-            --vocab-size 50257 \
-            ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
-            ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
-            ${NCA_SEED:+--seed "$NCA_SEED"}
+        # Detect GPU count for DDP
+        NGPU=$(${PYTHON} -c "import torch; print(torch.cuda.device_count())" 2>/dev/null || echo 1)
+        echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG, GPT-2 vocab, ${NGPU} GPUs)..."
+        if [ "$NGPU" -gt 1 ]; then
+            # Use different master port and clear parent DDP env to avoid conflicts
+            unset RANK LOCAL_RANK WORLD_SIZE MASTER_ADDR MASTER_PORT GROUP_RANK LOCAL_WORLD_SIZE ROLE_RANK TORCHELASTIC_RESTART_COUNT TORCHELASTIC_MAX_RESTARTS TORCHELASTIC_RUN_ID 2>/dev/null
+            torchrun --standalone --nproc_per_node="$NGPU" --master_port 29501 pretrain.py \
+                --data-dir ./data \
+                --output-dir ./checkpoints \
+                --config "$CONFIG" \
+                --vocab-size 50257 \
+                ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
+                ${NCA_SEED:+--seed "$NCA_SEED"}
+        else
+            $PYTHON pretrain.py \
+                --data-dir ./data \
+                --output-dir ./checkpoints \
+                --config "$CONFIG" \
+                --vocab-size 50257 \
+                ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
+                ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
+                ${NCA_SEED:+--seed "$NCA_SEED"}
+        fi
     else
         echo ">>> Step 2: NCA checkpoint already exists, skipping"
     fi
