@@ -242,8 +242,8 @@ def train(args):
                   f"loss {train_loss_accum:.4f} | "
                   f"lr {lr:.2e} | {tok_per_sec:,.0f} tok/s")
 
-        # Evaluation (rank 0 only)
-        if is_main and (step % eval_interval == 0 or step == total_steps - 1):
+        # Evaluation (rank 0 only, skipped if --skip-eval)
+        if is_main and not skip_eval and (step % eval_interval == 0 or step == total_steps - 1):
             model.eval()
             val_losses = []
             val_bs = min(batch_size, val_tokens.shape[0])
