@@ -710,6 +710,8 @@ if not args.no_nca_pretrain:
             print0("=== NCA pipeline complete ===")
         if ddp:
             dist.barrier()
+    # Re-detect after pipeline may have created the checkpoint
+    nca_ckpt = nca_ckpt_gpt2 if os.path.exists(nca_ckpt_gpt2) else nca_ckpt_legacy
     nca_checkpoint_path = nca_ckpt
 
 device_type = device.type
