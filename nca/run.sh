@@ -1,21 +1,26 @@
 #!/bin/bash
 # NCA Pre-Pre-Training Pipeline for Slowrun
 #
-# Run this BEFORE the main slowrun training to pre-train trunk weights
-# on synthetic NCA data. Then pass the checkpoint to train.py.
+# Two modes:
+#   GPT-2 vocab (default): generates NCA data tokenized with GPT-2 BPE,
+#     trains directly — no weight transfer needed, all weights including
+#     embeddings carry over.
+#   10K vocab (legacy): patch-based 10K vocab, requires weight transfer.
 #
 # Usage:
 #   cd nca/
 #   bash run.sh
 #   cd ..
-#   torchrun --standalone --nproc_per_node=8 train.py --pretrained-checkpoint nca/checkpoints/transferred.pt
+#   torchrun --standalone --nproc_per_node=8 train.py --pretrained-checkpoint nca/checkpoints/nca_best.pt
 #
 # Environment variables:
-#   NCA_CONFIG   - pretrain config: tiny, small, full (default: full)
+#   NCA_CONFIG   - pretrain config: tiny, medium, small, full (default: full)
 #   NCA_DEVICE   - device override (default: auto-detect)
 #   NCA_EPOCHS   - override number of epochs
+#   NCA_TOKENS   - number of NCA tokens to generate (default: 10000000)
 #   NCA_SEED     - training seed (default: 42)
-#   NUM_WORKERS  - data generation workers (default: 8)
+#   NCA_MODE     - "gpt2" (default) or "10k" (legacy patch vocab)
+#   NUM_WORKERS  - data generation workers for 10k mode (default: 8)
 #   PYTHON       - python binary (default: python3)
 set -e
 
@@ -23,49 +28,85 @@ PYTHON=${PYTHON:-python3}
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-echo "=== NCA Pre-Pre-Training Pipeline ==="
-echo ""
-
-# Step 1: Generate NCA data (CPU-only, can run on any machine)
-if [ ! -f data/nca_train.pt ]; then
-    echo ">>> Step 1: Generating NCA data..."
-    $PYTHON generate_data.py \
-        --output-dir ./data \
-        --num-tokens 164000000 \
-        --num-workers "${NUM_WORKERS:-8}"
-else
-    echo ">>> Step 1: NCA data already exists, skipping"
-fi
-echo ""
-
-# Step 2: Pre-train on NCA data (single GPU)
+MODE=${NCA_MODE:-gpt2}
 CONFIG=${NCA_CONFIG:-full}
-if [ ! -f checkpoints/nca_best.pt ]; then
-    echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG)..."
-    $PYTHON pretrain.py \
-        --data-dir ./data \
-        --output-dir ./checkpoints \
-        --config "$CONFIG" \
-        ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
-        ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
-        ${NCA_SEED:+--seed "$NCA_SEED"}
-else
-    echo ">>> Step 2: NCA checkpoint already exists, skipping"
-fi
+TOKENS=${NCA_TOKENS:-10000000}
+
+echo "=== NCA Pre-Pre-Training Pipeline (mode: $MODE) ==="
 echo ""
 
-# Step 3: Transfer weights to slowrun vocab
-if [ ! -f checkpoints/transferred.pt ]; then
-    echo ">>> Step 3: Transferring weights..."
-    $PYTHON transfer.py \
-        --nca-checkpoint ./checkpoints/nca_best.pt \
-        --output ./checkpoints/transferred.pt \
-        --target-vocab-size 50257
-else
-    echo ">>> Step 3: Transferred checkpoint already exists, skipping"
-fi
+if [ "$MODE" = "gpt2" ]; then
+    # ── GPT-2 vocab pipeline (no transfer needed) ──────────────
+    if [ ! -f data/nca_train.pt ]; then
+        echo ">>> Step 1: Generating NCA data (GPT-2 vocab, GPU)..."
+        $PYTHON generate_data_gpt2.py \
+            --num-tokens "$TOKENS" \
+            --output-dir ./data \
+            ${NCA_SEED:+--seed "$NCA_SEED"}
+    else
+        echo ">>> Step 1: NCA data already exists, skipping"
+    fi
+    echo ""
 
-echo ""
-echo "=== Done! ==="
-echo "Run slowrun with:"
-echo "  torchrun --standalone --nproc_per_node=8 train.py --pretrained-checkpoint nca/checkpoints/transferred.pt"
+    if [ ! -f checkpoints/nca_best.pt ]; then
+        echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG, GPT-2 vocab)..."
+        $PYTHON pretrain.py \
+            --data-dir ./data \
+            --output-dir ./checkpoints \
+            --config "$CONFIG" \
+            --vocab-size 50257 \
+            ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
+            ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
+            ${NCA_SEED:+--seed "$NCA_SEED"}
+    else
+        echo ">>> Step 2: NCA checkpoint already exists, skipping"
+    fi
+
+    echo ""
+    echo "=== Done! ==="
+    echo "Checkpoint ready at nca/checkpoints/nca_best.pt (no transfer needed)"
+    echo "Run slowrun with:"
+    echo "  torchrun --standalone --nproc_per_node=8 train.py --pretrained-checkpoint nca/checkpoints/nca_best.pt"
+
+else
+    # ── Legacy 10K vocab pipeline (with transfer) ──────────────
+    if [ ! -f data/nca_train.pt ]; then
+        echo ">>> Step 1: Generating NCA data (10K vocab, CPU)..."
+        $PYTHON generate_data.py \
+            --output-dir ./data \
+            --num-tokens "$TOKENS" \
+            --num-workers "${NUM_WORKERS:-8}"
+    else
+        echo ">>> Step 1: NCA data already exists, skipping"
+    fi
+    echo ""
+
+    if [ ! -f checkpoints/nca_best.pt ]; then
+        echo ">>> Step 2: Pre-training on NCA data (config: $CONFIG)..."
+        $PYTHON pretrain.py \
+            --data-dir ./data \
+            --output-dir ./checkpoints \
+            --config "$CONFIG" \
+            ${NCA_DEVICE:+--device "$NCA_DEVICE"} \
+            ${NCA_EPOCHS:+--epochs "$NCA_EPOCHS"} \
+            ${NCA_SEED:+--seed "$NCA_SEED"}
+    else
+        echo ">>> Step 2: NCA checkpoint already exists, skipping"
+    fi
+    echo ""
+
+    if [ ! -f checkpoints/transferred.pt ]; then
+        echo ">>> Step 3: Transferring weights..."
+        $PYTHON transfer.py \
+            --nca-checkpoint ./checkpoints/nca_best.pt \
+            --output ./checkpoints/transferred.pt \
+            --target-vocab-size 50257
+    else
+        echo ">>> Step 3: Transferred checkpoint already exists, skipping"
+    fi
+
+    echo ""
+    echo "=== Done! ==="
+    echo "Run slowrun with:"
+    echo "  torchrun --standalone --nproc_per_node=8 train.py --pretrained-checkpoint nca/checkpoints/transferred.pt"
+fi

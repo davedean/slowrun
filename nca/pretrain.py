@@ -14,6 +14,7 @@ Usage (full config, cloud):
 """
 
 import argparse
+import copy
 import math
 import os
 import time
@@ -29,6 +30,10 @@ CONFIGS = {
     "tiny": dict(
         n_layer=4, n_head=4, n_kv_head=4, n_embd=256,
         batch_size=64, grad_accum=1, lr=1e-3, epochs=3,
+    ),
+    "medium": dict(
+        n_layer=8, n_head=8, n_kv_head=8, n_embd=512,
+        batch_size=4, grad_accum=1, lr=3e-4, epochs=3,
     ),
     "small": dict(
         n_layer=12, n_head=8, n_kv_head=8, n_embd=768,
@@ -91,10 +96,10 @@ def train(args):
     train_tokens = load_nca_data(args.data_dir, "train")
     val_tokens = load_nca_data(args.data_dir, "val")
 
-    # Determine vocab size from data
+    # Determine vocab size from data (or use override)
     max_token = max(train_tokens.max().item(), val_tokens.max().item())
-    vocab_size = max_token + 1
-    print(f"Vocab size: {vocab_size}")
+    vocab_size = getattr(args, 'vocab_size', None) or (max_token + 1)
+    print(f"Vocab size: {vocab_size} (max token in data: {max_token})")
 
     # Create model
     model_config = GPTConfig(
@@ -109,6 +114,16 @@ def train(args):
     model = GPT(model_config)
     model.init_weights()
     model = model.to(device)
+
+    # torch.compile for GPU speedup
+    use_compile = device != "cpu" and not getattr(args, 'no_compile', False)
+    if use_compile:
+        model = torch.compile(model, mode="reduce-overhead")
+
+    def _unwrapped_state_dict():
+        """Strip _orig_mod. prefix from torch.compile'd state dict."""
+        sd = model.state_dict()
+        return {k.removeprefix("_orig_mod."): v for k, v in sd.items()}
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model params: {n_params:,}")
@@ -126,7 +141,7 @@ def train(args):
     n_train_tokens = train_tokens.shape[0] * seq_len
     steps_per_epoch = n_train_tokens // tokens_per_step
     total_steps = steps_per_epoch * cfg["epochs"]
-    eval_interval = max(1, steps_per_epoch // 5)
+    eval_interval = max(1, steps_per_epoch // 2)
 
     print(f"Batch: {batch_size} x {grad_accum} accum = {effective_batch} effective")
     print(f"Steps/epoch: {steps_per_epoch}, total: {total_steps}")
@@ -143,6 +158,10 @@ def train(args):
 
     best_val_loss = float("inf")
     t0 = time.time()
+
+    # Periodic checkpoint saving (every N tokens processed)
+    save_every_tokens = getattr(args, 'save_every_tokens', 0)
+    next_save_at = save_every_tokens if save_every_tokens > 0 else float("inf")
 
     for step in range(total_steps):
         # LR schedule
@@ -166,8 +185,23 @@ def train(args):
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
+        # Periodic token-based checkpoint
+        tokens_so_far = (step + 1) * tokens_per_step
+        if tokens_so_far >= next_save_at:
+            tok_m = int(next_save_at) // 1_000_000
+            ckpt_path = os.path.join(args.output_dir, f"nca_at_{tok_m}M.pt")
+            torch.save({
+                "model_state_dict": _unwrapped_state_dict(),
+                "config": model_config,
+                "step": step,
+                "tokens_seen": tokens_so_far,
+                "val_loss": best_val_loss,
+            }, ckpt_path)
+            print(f"  >> saved periodic checkpoint at ~{tok_m}M tokens: {ckpt_path}")
+            next_save_at += save_every_tokens
+
         # Logging
-        if step % 10 == 0:
+        if step % 50 == 0:
             elapsed = time.time() - t0
             tok_per_sec = (step + 1) * tokens_per_step / elapsed
             print(f"step {step:>5d}/{total_steps} | "
@@ -196,7 +230,7 @@ def train(args):
                 best_val_loss = val_loss
                 ckpt_path = os.path.join(args.output_dir, "nca_best.pt")
                 torch.save({
-                    "model_state_dict": model.state_dict(),
+                    "model_state_dict": _unwrapped_state_dict(),
                     "config": model_config,
                     "step": step,
                     "val_loss": val_loss,
@@ -206,7 +240,7 @@ def train(args):
     # Save final checkpoint
     final_path = os.path.join(args.output_dir, "nca_final.pt")
     torch.save({
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": _unwrapped_state_dict(),
         "config": model_config,
         "step": total_steps,
         "val_loss": best_val_loss,
@@ -218,6 +252,29 @@ def train(args):
     print(f"Saved: {final_path}")
 
     return best_val_loss
+
+
+def train_from_config(data_dir, output_dir, config_name="tiny", device="cuda",
+                      epochs=None, lr=None, batch_size=None, seq_len=1024,
+                      save_every_tokens=0, vocab_size=None, seed=42):
+    """Callable entry point for sweep scripts. Deep-copies config to avoid mutation."""
+    saved = copy.deepcopy(CONFIGS[config_name])
+    try:
+        if epochs is not None:
+            CONFIGS[config_name]["epochs"] = epochs
+        if lr is not None:
+            CONFIGS[config_name]["lr"] = lr
+        if batch_size is not None:
+            CONFIGS[config_name]["batch_size"] = batch_size
+        os.makedirs(output_dir, exist_ok=True)
+        args = argparse.Namespace(
+            data_dir=data_dir, output_dir=output_dir, config=config_name,
+            device=device, seq_len=seq_len, save_every_tokens=save_every_tokens,
+            vocab_size=vocab_size, seed=seed,
+        )
+        return train(args)
+    finally:
+        CONFIGS[config_name] = saved
 
 
 def main():
@@ -236,7 +293,13 @@ def main():
                         help="Override config batch size")
     parser.add_argument("--grad-accum", type=int, default=None,
                         help="Override config gradient accumulation steps")
+    parser.add_argument("--vocab-size", type=int, default=None,
+                        help="Force vocab size (e.g. 50257 for GPT-2)")
+    parser.add_argument("--save-every-tokens", type=int, default=0,
+                        help="Save periodic checkpoint every N tokens (0=off)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-compile", action="store_true",
+                        help="Disable torch.compile")
     args = parser.parse_args()
 
     # Device selection
