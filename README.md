@@ -43,6 +43,7 @@ The limited-compute track caps runs at a single 8xH100 node for at most 1 hour.
 7 | 3.285 | Repeat layers 15-20 for last 3 epochs, reduce warmdown | 03/11/26 | 53.3 mins (training time only) | [Script](https://github.com/qlabs-eng/slowrun/blob/7d8e580ab6a339079294562d000df3f7b1ce8c3c/train.py) | [@shmublu](https://x.com/ShmuelBerman)
 8 | 3.278 | Run layers 15-20 3 times before layers 21-29 for the last 3 epochs | 03/11/26 | 55.7 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/64be4733075251c7da1d8b25529963520b16cdb8/train.py) | [@akshayvegesna](https://x.com/akshayvegesna)
 9 | 3.276 | Add [exclusive self attention (XSA)](https://arxiv.org/pdf/2603.09078) | 03/12/26 | 57.7 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/ac968a62c633d75d972afa6d86a59f89e12997b9/train.py) | [@not-nonymous](https://github.com/not-nonymous)
+10 | 3.270 | LR tuning, warmdown tuning | 03/16/26 | 55.5 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/28152d9996d9e910d4fb1b4a569fae399c546d6b/train.py) | [@zhiweixx](https://x.com/zhiweixux)
 
 
 ### Tiny Track (15 minutes)
@@ -57,6 +58,7 @@ The tiny track caps runs at a single 8xH100 node for at most 15 minutes.
 4 | 3.385 | Add gating per attention head | 03/04/26 | 14.6 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/781d005e8e99a8af0ee9ab356a4c543778730f6b/tiny/train.py) | [@ChinmayK0607](https://x.com/ChinmayKak)
 5 | 3.383 | Update warmdown ratio | 03/06/26 | 14.6 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/56559aa8526708c107e1e28eb8fc4a1721bd9c67/tiny/train.py) | [@not-nonymous](https://github.com/not-nonymous)
 6 | 3.374 | Half truncated RoPE, partial key offset, residual lambdas to 1.1 | 03/06/26 | 14.8 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/ed62160275273197c3a996c4469d735a05c5eedb/tiny/train.py) | [@ChinmayK0607](https://x.com/ChinmayKak)
+7 | 3.365 | Add weight decay schedule | 03/15/26 | 14.8 mins | [Script](https://github.com/qlabs-eng/slowrun/blob/42c39127d19bebbb806afd630fa852936da35562/tiny/train.py) | [@shmublu](https://x.com/ShmuelBerman)
 
 
 
