@@ -211,8 +211,14 @@ class GPT(nn.Module):
 
     def _precompute_rotary(self, seq_len, head_dim, base=10000):
         device = self.transformer.wte.weight.device
-        inv_freq = 1.0 / (base ** (torch.arange(0, head_dim, 2,
-                          dtype=torch.float32, device=device) / head_dim))
+        # Half-truncated RoPE: only rotate half the dims, leave the rest stationary
+        # Matches tiny/train.py and train.py competition models
+        half = head_dim // 4  # number of frequency pairs for the rotated half
+        inv_freq = 1.0 / (base ** (torch.arange(0, half * 2, 2,
+                          dtype=torch.float32, device=device) / (half * 2)))
+        # Pad with zeros for the stationary half
+        inv_freq = torch.cat([inv_freq, torch.zeros(head_dim // 2 - half,
+                              dtype=torch.float32, device=device)])
         t = torch.arange(seq_len, dtype=torch.float32, device=device)
         freqs = torch.outer(t, inv_freq)
         cos, sin = freqs.cos().bfloat16(), freqs.sin().bfloat16()
